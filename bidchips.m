@@ -10,7 +10,9 @@
 % correlates" by P Ramachandran, GA Palidwor, and TJ Perkins, Epigenetics &
 % Chromatin, 2015, 8:33
 %
-% Copyright (c) 2015 by the authors of the above paper.  All rights reserved.
+% Copyright (c) 2015 by the authors of the above paper. 
+%
+% Code prototyped and written by P. Ramachandran
 % 
 % ---------------------------------------------------------------------------------
 % Citation: If you use this package, please cite: BIDCHIPS: bias decomposition
@@ -21,8 +23,6 @@
 % 
 % Licence: This code is free to use for non-commerical purposes.
 %
-% FEEDBACK: For questions, comments, e-mail rpara26@gmail.com, tperkins@ohri.ca
-% 
 % Posted on www.perkinslab.ca in Sept. 2015
 %
 % USAGE: 
