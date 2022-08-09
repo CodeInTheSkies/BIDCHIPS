@@ -1,6 +1,8 @@
 ## BIDCHIPS
  
-BIDCHIPS: bias decomposition and removal from ChIP-seq data
+#### BIDCHIPS: bias decomposition and removal from ChIP-seq data
+
+### Citation
  
 This folder contains R and Matlab codes in support of the publication:
 
@@ -8,7 +10,11 @@ This folder contains R and Matlab codes in support of the publication:
 
 If you use this code, please cite the above publication.
 
+### Matlab version
+
 [The Matlab code comes as a single m-file](/bidchips.m) that has all the required dependencies within it. Detailed header comments are given at the beginning of the file explaining usage with examples.
+
+### R version
 
 The R code can be found in the folder [BIDCHIPS_R](/BIDCHIPS_R), and was written and prepared by the work's co-author Gareth Palidwor.
 
