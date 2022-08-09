@@ -8,7 +8,7 @@ This folder contains R and Matlab codes in support of the publication:
 
 If you use this code, please cite the above publication.
 
-The Matlab code comes as a single m-file that has all the required dependencies within it. Detailed header comments are given at the beginning of the file explaining usage with examples.
+[The Matlab code comes as a single m-file](/bidchips.m) that has all the required dependencies within it. Detailed header comments are given at the beginning of the file explaining usage with examples.
 
 The R code can be found in the folder [BIDCHIPS_R](/BIDCHIPS_R), and was written and prepared by the work's co-author Gareth Palidwor.
 
