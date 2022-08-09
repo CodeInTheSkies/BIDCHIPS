@@ -1,0 +1,163 @@
+library(BSgenome.Hsapiens.UCSC.hg19)
+library(GenomicRanges)
+library(rtracklayer)
+library(Rsamtools)
+library(biovizBase)
+library(parallel)
+
+allchroms<-grep("chr[123456789X0]+$",seqnames(BSgenome.Hsapiens.UCSC.hg19),value=T)
+chromlens<-seqlengths(BSgenome.Hsapiens.UCSC.hg19)[allchroms]
+
+#get chromosomes or ALL
+getBAM<-function(bamfilename,regions){
+  if(class(regions) != "GRanges" && regions == c("ALL")){
+    regions<-allchroms
+  }
+  what <- c("rname", "strand", "pos","qwidth")
+  flag=scanBamFlag(isUnmappedQuery=FALSE,isNotPrimaryRead=FALSE)
+  param<-ScanBamParam(what=what,flag)
+  input_bam<-scanBam(bamfilename,param=param)
+  b1<-lapply(names(input_bam[[1]]),function(elt){ do.call(c,unname(lapply(input_bam,"[[",elt)))})
+  names(b1) <- names(input_bam[[1]])
+  df2 <- do.call("DataFrame",b1)
+  df2$rname<-factor(levels(input_bam[[1]]$rname)[df2$rname],levels=levels(input_bam[[1]]$rname)) 
+  df2$strand<-factor(levels(input_bam[[1]]$strand)[df2$strand],levels=levels(input_bam[[1]]$strand))
+  df2$qwidth<-input_bam[[1]]$qwidth
+  df2<-df2[df2$rname!="chrM",] #filter these the same way as the others are (regexp)
+  #uniquified based on rname,strand,pos NOT qwidth
+  df2<-df2[!duplicated(df2[,1:3]),] 
+  thestart=df2$pos+(df2$qwidth-1)*ifelse(df2$strand=="+",0,1)
+  #handle potenital overlap of negative
+  seqpos<-GRanges(seqnames=df2$rname,
+                  IRanges(start=thestart,end=thestart))#,
+                  #seqlengths=chromlens[chroms])
+  c2<-coverage(seqpos)
+  rc<-list()
+  
+  if(class(regions)=="GRanges"){
+    allchromtable<-as.data.frame(regions)
+    for(chromname in levels(allchromtable$seqnames)){
+      v2<-as.numeric(c2[[chromname]]) 
+      print(v2)
+      print(chromname)
+      rr1<-as.data.frame(ranges(subset(regions,seqnames==chromname)))
+      rc[[chromname]]<-unlist(mclapply(1:nrow(rr1),
+                                   function(x){sum(v2[rr1[x,1]:rr1[x,2]])},
+                                   mc.cores=cores))
+    }
+  }else{
+    for(chromname in regions){
+      v2<-as.numeric(c2[[chromname]]) 
+      print(chromname)
+      rc[[chromname]]<-unlist(mclapply(1:floor(length(c2[[chromname]])/WinSz),
+                                     function(x){sum(v2[((x-1)*WinSz+1):(x*WinSz)])},
+                                     mc.cores=cores))
+    }
+  }
+  return(rc)
+}
+
+#this should be chromname or region
+getMapability<-function(MapabilityBwFile,regions,ReadLen){
+  bwf<-BigWigFile(MapabilityBwFile)
+  bw_rd<-import(bwf)  
+  bw1_rd<-subset(bw_rd,score==1)
+  c1<-coverage(bw1_rd)
+  mapability<-list()
+  
+  if(class(regions)=="GRanges"){
+    allchromtable<-as.data.frame(regions)
+    for(chromname in levels(allchromtable$seqnames)){
+      chromtable<-subset(allchromtable,seqnames==chromname)
+      chromcount<-mclapply(1:nrow(chromtable),
+                           function(x){sum(as.numeric(c1[[chromname]][chromtable[x,2]:chromtable[x,3]]),
+                                           as.numeric(c1[[chromname]][chromtable[x,2]:chromtable[x,3]+ReadLen-1])
+                           )/(2*WinSz)},
+                           mc.cores=cores)
+      mapability[[chromname]]<-chromcount
+    }
+  }else{
+    if(regions == "ALL"){
+      regions<-allchroms
+    }
+    mpos_count<-list()
+    mneg_count<-list()  
+    for(chromname in regions){
+      print(chromname)
+      v1<-as.numeric(c1[[chromname]])
+      mpos_count[[chromname]]<-mclapply(1:floor(length(c1[[chromname]])/WinSz),
+                                      function(x){sum(v1[((x-1)*WinSz+1):(x*WinSz)])},
+                                      mc.cores=cores)
+      mneg_count[[chromname]]<-c(sum(v1[1:(WinSz-(ReadLen-1))]/(WinSz-(ReadLen-1))), #this is the first window
+                                       mclapply(2:floor(length(c1[[chromname]]-(ReadLen-1))/WinSz), 
+                                        function(x){sum(v1[((x-1)*WinSz+1):(x*WinSz)-(ReadLen-1)])},
+                                        mc.cores=cores))
+      print(mpos_count[[chromname]])
+      mapability[[chromname]]<-(unlist(mpos_count[[chromname]])+unlist(mneg_count[[chromname]]))/(2*WinSz)
+    }  
+  }
+  mapability
+}
+
+#generate and save a structure
+#one containing the windows used to geerate the model
+#one containing the linear model generated
+setup<-function(WinSz,ReadLen,cores,MapabilityBwFile,regions,
+                inBamFilesList,outBamFileList,modeloutfile,windowsoutfile){
+  #regions is either ALL, chromosomes or [bed file, add later]
+  halfWin     = (WinSz-1)/2
+  chroms<-c()
+  if(class(regions) == "GRanges"){
+    chroms<-levels(as.data.frame(regions)$seqnames)
+  }else{
+    chroms<-regions
+    if(regions=="ALL"){
+      chroms=allchroms
+    }
+  }
+  
+  #generating window tables
+  allintstarts<-c()
+  allintchrom<-c()
+  for(chrom in chroms){
+    chromlen<-chromlens[chrom]
+    intstarts<-seq(1,chromlen,WinSz)
+    allintstarts<-c(allintstarts,intstarts)
+    intchrom<-rep(chrom,length(intstarts))
+    allintchrom<-c(allintchrom,intchrom)
+  }
+  allintends<-allintstarts+WinSz-1
+  g1<-GRanges(seqnames=allintchrom,
+            IRanges(start=allintstarts,end=allintends),
+            seqlengths=chromlens[chroms])
+  g1<-trim(g1)
+  g1<-g1[width(g1)==WinSz]
+
+  #this one works
+  af1_gc<-GCcontent(Hsapiens, g1)
+
+  #getBAM g1 support
+  inbamreadslist<-list()
+  for(bam in names(inBamFilesList)){
+    bamfile<-inBamFilesList[[bam]]
+    inbamreadslist[[bam]]<-getBAM(bamfile,regions)
+  }
+  
+  outbamreadslist<-list()
+  bam<-names(outBamFilesList[1])
+  bamfile<-outBamFilesList[[bam]]
+  outbamreadslist[[bam]]<-getBAM(bamfile,regions)
+
+  #figure out how to get mapability of a region
+  mapability<-getMapability(MapabilityBwFile,regions,ReadLen)
+
+  df<-data.frame(mapability,gc=af1_gc[,1])
+  df<-cbind(df,data.frame(lapply(inbamreadslist,function(x){unlist(x)})))
+  df<-cbind(data.frame(lapply(outbamreadslist,function(x){unlist(x)})),df)
+  formula<-paste(colnames(df)[1],"~",".")
+  mymodel<-lm(formula,df)
+  save(mymodel,file=modeloutfile)
+  save(df,file=windowsoutfile)
+  c(mymodel,df)
+}
+
